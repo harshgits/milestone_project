@@ -113,17 +113,20 @@ app = Flask(__name__)
 def index():
 
 	# Determine the selected feature
-	current_ticker = request.args.get("ticker")
-	if current_ticker == None:
-		current_ticker = "AAPL"
+	# current_ticker = request.args.get("ticker")
+	# if current_ticker == None:
+	# 	current_ticker = "AAPL"
 
-	# Create the plot
-	plot = create_figure(current_ticker)
+	# # Create the plot
+	# plot = create_figure(current_ticker)
 		
-	# Embed plot into HTML via Flask Render
-	script, div = components(plot)
-	return render_template("template.html", script=script, div=div,
-		tickers = tickers,  current_ticker = current_ticker)
+	# # Embed plot into HTML via Flask Render
+	# script, div = components(plot)
+	# return render_template("template.html", script=script, div=div,
+	# 	tickers = tickers,  current_ticker = current_ticker)
+
+
+	return render_template("template.html")
 
 # With debug=True, Flask server will auto-reload 
 # when there are code changes
