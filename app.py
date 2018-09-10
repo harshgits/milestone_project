@@ -1,88 +1,131 @@
-from flask import Flask, render_template
-import random
-from bokeh.models import (HoverTool, FactorRange, Plot, LinearAxis, Grid,
-                          Range1d)
-from bokeh.models.glyphs import VBar
-from bokeh.plotting import figure
-from bokeh.charts import Bar
+from flask import Flask, render_template, request
+import pandas as pd
+import numpy as np
+import quandl
 from bokeh.embed import components
-from bokeh.models.sources import ColumnDataSource
-from flask import Flask, render_template
+from bokeh.plotting import figure
 
+### ONE TIME ACTIONS
+
+# set quandl credentials and get AAPL data
+quandl.ApiConfig.api_key = "A2ZxqULvCzTjy_-W2sSu"
+quandl.ApiConfig.api_version = '2015-04-09'
+
+ticker_df = pd.read_csv('ticker_symbols.csv')
+ticker_df.set_index('code', inplace = True)
+
+tickers = ['AAPL', 'HD']
+
+###/\ /\ /\ ONE TIME ACTIONS
+
+## common functions
+
+# function for converting objects to pd_datetime
+def pddt(obj):
+    return pd.to_datetime(obj)
+
+# sparse_mask!
+# make an array of Trues and Falses
+# with a fixed number of evenly spaced Trues
+def sparse_mask(n_orig, n_keep):
+    # n_keep and n_orig must be ints!
+    
+    def divisible(n, w):
+        return (n%w == 0)
+    
+    mask_vals = None
+    
+    if n_orig < n_keep: # do nothing
+        mask_vals = [True]*n_orig
+    
+    else:
+        spacing = n_orig // n_keep
+        ix1s = list(range(1, n_keep * spacing + 1))
+        
+        # mask_val is True only if corresponding
+        # ix1 is divisible by spacing
+        mask_vals = map(lambda ix1: ix1 % spacing == 0,
+                  ix1s)
+        mask_vals = list(mask_vals)
+        
+        # pad with Falses
+        mask_vals += [False] * (n_orig - n_keep*spacing)
+        
+    return np.array(mask_vals)
+
+
+# Create the main plot
+def create_figure(ticker, ticker_df = ticker_df):
+
+	## plot
+
+	# query data
+	df = quandl.get("EOD/" + ticker)
+
+	# make col names and index lowercase
+	# make index pd_datetime format
+	df.columns = map(str.lower, df.columns)
+	df.index.name = str.lower(df.index.name)
+	df.index = pddt(df.index)
+
+	# keep only some rows from the df
+	start_date_str = '1900'
+	end_date_str = '2050'
+	df_sub = df[(df.index > pddt(start_date_str)) & (df.index < pddt(end_date_str))]
+	df_sub = df_sub[['close']]
+
+	# sparsify
+	n_points = 40
+	df_sub = df_sub.iloc[sparse_mask(len(df_sub), n_points)]
+
+	# diffs
+	df_sub['diff'] = df_sub['close'].diff()
+	df_sub['close_yest'] = df_sub['close'].shift()
+	fall_dates = df_sub.index[df_sub['diff'] < 0]
+
+	# make figure skeleton
+	p = figure(x_axis_type="datetime", title = ticker_df['name'][ticker])
+	p.yaxis.axis_label = "Price"
+	p.xaxis.axis_label = "Date"
+	p.xaxis.major_label_orientation = np.pi/4
+	p.grid.grid_line_alpha=0.3
+
+	# candlestick width
+	width = (df_sub.index[-1] - df_sub.index[0]).total_seconds() / n_points * .7 \
+	    * 1000 # candlestick width in ms
+	    
+	# rises
+	rise_dates = df_sub.index[df_sub['diff'] > 0]
+	p.vbar(rise_dates, width, df_sub['close_yest'][rise_dates], df_sub['close'][rise_dates], 
+	       fill_color="dodgerblue", line_color="white") # rises
+
+	# falls
+	fall_dates = df_sub.index[df_sub['diff'] < 0]
+	p.vbar(fall_dates, width, df_sub['close_yest'][fall_dates], df_sub['close'][fall_dates], 
+	       fill_color="coral", line_color="white") # rises
+
+	return p
+
+# Index page
 app = Flask(__name__)
+@app.route('/')
 
+def index():
 
-@app.route("/<int:bars_count>/")
-def chart(bars_count):
-    if bars_count <= 0:
-        bars_count = 1
+	# Determine the selected feature
+	current_ticker = request.args.get("ticker")
+	if current_ticker == None:
+		current_ticker = "AAPL"
 
-    data = {"days": [], "bugs": [], "costs": []}
-    for i in range(1, bars_count + 1):
-        data['days'].append(i)
-        data['bugs'].append(random.randint(1,100))
-        data['costs'].append(random.uniform(1.00, 1000.00))
+	# Create the plot
+	plot = create_figure(current_ticker)
+		
+	# Embed plot into HTML via Flask Render
+	script, div = components(plot)
+	return render_template("template.html", script=script, div=div,
+		tickers = tickers,  current_ticker = current_ticker)
 
-    hover = create_hover_tool()
-    plot = create_bar_chart(data, "Bugs found per day", "days",
-                            "bugs", hover)
-    script, div = components(plot)
-
-    return render_template("chart.html", bars_count=bars_count,
-                           the_div=div, the_script=script)
-
-def create_hover_tool():
-    """Generates the HTML for the Bokeh's hover data tool on our graph."""
-    hover_html = """
-      <div>
-        <span class="hover-tooltip">$x</span>
-      </div>
-      <div>
-        <span class="hover-tooltip">@bugs bugs</span>
-      </div>
-      <div>
-        <span class="hover-tooltip">$@costs{0.00}</span>
-      </div>
-    """
-    return HoverTool(tooltips=hover_html)
-
-def create_bar_chart(data, title, x_name, y_name, hover_tool=None,
-                     width=1200, height=300):
-    """Creates a bar chart plot with the exact styling for the centcom
-       dashboard. Pass in data as a dictionary, desired plot title,
-       name of x axis, y axis and the hover tool HTML.
-    """
-    source = ColumnDataSource(data)
-    xdr = FactorRange(factors=data[x_name])
-    ydr = Range1d(start=0,end=max(data[y_name])*1.5)
-
-    tools = []
-    if hover_tool:
-        tools = [hover_tool,]
-
-    plot = figure(title=title, x_range=xdr, y_range=ydr, plot_width=width,
-                  plot_height=height, h_symmetry=False, v_symmetry=False,
-                  min_border=0, toolbar_location="above", tools=tools,
-                  responsive=True, outline_line_color="#666666")
-
-    glyph = VBar(x=x_name, top=y_name, bottom=0, width=.8,
-                 fill_color="#e12127")
-    plot.add_glyph(source, glyph)
-
-    xaxis = LinearAxis()
-    yaxis = LinearAxis()
-
-    plot.add_layout(Grid(dimension=0, ticker=xaxis.ticker))
-    plot.add_layout(Grid(dimension=1, ticker=yaxis.ticker))
-    plot.toolbar.logo = None
-    plot.min_border_top = 0
-    plot.xgrid.grid_line_color = None
-    plot.ygrid.grid_line_color = "#999999"
-    plot.yaxis.axis_label = "Bugs found"
-    plot.ygrid.grid_line_alpha = 0.1
-    plot.xaxis.axis_label = "Days after app deployment"
-    plot.xaxis.major_label_orientation = 1
-    return plot
-
+# With debug=True, Flask server will auto-reload 
+# when there are code changes
 if __name__ == '__main__':
-	app.run(debug = True)
+	app.run(port=5000, debug=True)
