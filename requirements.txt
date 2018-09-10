@@ -1,6 +1,5 @@
-Quandl==3.4.2
-numpy==1.14.0
-pandas==0.22.0
-Flask==0.12.2
+Flask==0.12
+pandas==0.19.2
 bokeh==0.12.13
-gunicorn==19.7.1
+gunicorn
+Quandl==3.4.2
